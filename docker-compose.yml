@@ -8,46 +8,56 @@ services:
     volumes:
       - .:/app
       - chromadb_data:/data/chromadb
+      - bm25_data:/data/bm25
       - repos_tmp:/tmp/repos
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
     restart: unless-stopped
 
   worker-reviews:
     build: .
-    command: celery -A app.worker celery_app worker --loglevel=info --queues=reviews --concurrency=4
+    command: celery -A app.worker worker --loglevel=info -Q reviews --concurrency=4
     env_file: .env
     volumes:
       - .:/app
       - chromadb_data:/data/chromadb
+      - bm25_data:/data/bm25
       - repos_tmp:/tmp/repos
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
     restart: unless-stopped
 
   worker-indexing:
     build: .
-    command: celery -A app.worker celery_app worker --loglevel=info --queues=indexing --concurrency=2
+    command: celery -A app.worker worker --loglevel=info -Q indexing --concurrency=2
     env_file: .env
     volumes:
       - .:/app
       - chromadb_data:/data/chromadb
+      - bm25_data:/data/bm25
       - repos_tmp:/tmp/repos
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
     restart: unless-stopped
 
   beat:
     build: .
-    command: celery -A app.worker celery_app beat --loglevel=info
+    command: celery -A app.worker beat --loglevel=info
     env_file: .env
     volumes:
       - .:/app
     depends_on:
-      - redis
+      redis:
+        condition: service_started
     restart: unless-stopped
 
   dashboard:
@@ -60,7 +70,8 @@ services:
     environment:
       - BACKEND_URL=http://api:8000
     depends_on:
-      - api
+      api:
+        condition: service_started
     restart: unless-stopped
 
   postgres:
@@ -73,6 +84,11 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U reviewapp -d reviewapp"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:7-alpine
@@ -85,4 +101,5 @@ volumes:
   postgres_data:
   redis_data:
   chromadb_data:
+  bm25_data:
   repos_tmp:

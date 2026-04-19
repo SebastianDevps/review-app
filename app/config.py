@@ -10,7 +10,8 @@ class Settings(BaseSettings):
     github_webhook_secret: str
 
     # Anthropic
-    anthropic_api_key: str
+    anthropic_api_key: str = "sk-ant-mock"  # optional when mock_ai=true
+    mock_ai: bool = False   # MOCK_AI=true → skip Anthropic calls (local testing)
 
     # Plane
     plane_api_key: str

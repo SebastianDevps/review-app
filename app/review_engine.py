@@ -39,10 +39,15 @@ CHUNK_SIZE = 12_000   # chars per diff chunk
 class ReviewEngine:
     def __init__(self, config: dict):
         self.config = config
-        self.client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        self._mock = settings.mock_ai
+        if not self._mock:
+            self.client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
 
     def _classify(self, diff_stats: str) -> str:
         """Use Haiku to classify PR complexity on diff stats only."""
+        if self._mock:
+            lines = diff_stats.count("\n")
+            return "trivial" if lines < 10 else "moderate" if lines < 30 else "complex"
         response = self.client.messages.create(
             model=CLASSIFY_MODEL,
             max_tokens=10,
@@ -171,6 +176,9 @@ class ReviewEngine:
             }
 
         # ── 2. Sonnet review (chunked diff) ───────────────────────────────────
+        if self._mock:
+            return self._mock_review(diff, pr_metadata, classification)
+
         system_prompt = self._build_system_prompt(context)
         chunks = [diff[i : i + CHUNK_SIZE] for i in range(0, len(diff), CHUNK_SIZE)]
         all_issues: list[dict] = []
@@ -273,6 +281,38 @@ class ReviewEngine:
                 )
 
         return "\n".join(lines)
+
+    def _mock_review(self, diff: str, pr_metadata: dict, classification: str) -> dict:
+        """Return a realistic-looking mock review for local testing without Anthropic API."""
+        lines_changed = pr_metadata.get("additions", 0) + pr_metadata.get("deletions", 0)
+        mock_issues = [
+            {
+                "severity": "medium",
+                "file": "app/example.py",
+                "line": 42,
+                "comment": "[MOCK] Consider adding input validation here before processing.",
+            },
+            {
+                "severity": "low",
+                "file": "app/example.py",
+                "line": 10,
+                "comment": "[MOCK] Missing docstring on public function.",
+            },
+        ]
+        result = {
+            "classification": classification,
+            "approved": True,
+            "issues": mock_issues,
+            "plane_state": "qa_testing",
+            "summary": (
+                f"[MOCK REVIEW] PR modifies {pr_metadata.get('changed_files', '?')} files "
+                f"with {lines_changed} line changes. No critical issues found in mock mode."
+            ),
+            "suggestion": "[MOCK] Add tests for the new functionality.",
+        }
+        result["pr_comment"] = self._format_pr_comment(result, pr_metadata)
+        result["plane_comment"] = self._format_plane_comment(result)
+        return result
 
     def _format_trivial_comment(self, pr_metadata: dict) -> str:
         changes = pr_metadata.get("additions", 0) + pr_metadata.get("deletions", 0)

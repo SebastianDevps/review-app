@@ -13,7 +13,7 @@ Endpoints:
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import desc, func
+from sqlalchemy import Integer, desc, func
 from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
@@ -268,7 +268,7 @@ def get_dev(login: str, db: Session = Depends(get_db)) -> dict:
     }
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# ── Helpers ──────────────────────────────────────────────────────────────────
 
 def _pr_to_dict(pr: PullRequest) -> dict:
     review = pr.review
@@ -293,6 +293,3 @@ def _pr_to_dict(pr: PullRequest) -> dict:
         } if review else None,
     }
 
-
-# Import Integer for SQL cast
-from sqlalchemy import Integer  # noqa: E402
