@@ -1,0 +1,11 @@
+.env
+*.pem
+*.key
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+dist/
+*.egg-info/
+.venv/
+/tmp/repos/

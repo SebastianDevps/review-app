@@ -1,0 +1,64 @@
+# ── Review App Configuration ───────────────────────────────────────────────────
+# Copy this file to each connected repo and fill in the Plane state UUIDs.
+# The app reads this file from the repo root on every review.
+
+project:
+  name: "My Project"
+  # Used for logging and dashboard labels only
+  description: "Short description of the project"
+
+# ── AI Models ─────────────────────────────────────────────────────────────────
+models:
+  classify: "claude-haiku-4-5-20251001"   # cheap, fast — classifies diff only
+  review: "claude-sonnet-4-6"              # full review — only for moderate/complex
+
+# ── Diff thresholds ────────────────────────────────────────────────────────────
+thresholds:
+  trivial_max_lines: 50         # PRs under this line count → auto-approved, no Sonnet
+  complex_min_lines: 300        # PRs over this → full Sonnet review with all context
+  max_diff_lines: 3000          # PRs over this → skip entirely (avoid token blowup)
+
+# ── Plane integration ──────────────────────────────────────────────────────────
+plane:
+  workspace_slug: "your-workspace-slug"     # e.g. "nellup" or "my-company"
+  project_id: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+
+  # State UUIDs — get these from Plane API or Settings > States
+  # GET /api/v1/workspaces/{slug}/projects/{id}/states/
+  states:
+    code_review: ""       # UUID of "Code Review" state
+    qa_testing: ""        # UUID of "QA/Testing" state
+    refused: ""           # UUID of "Refused" state
+    impediment: ""        # UUID of "Impediment" state
+
+  # Branch pattern for extracting issue ID
+  # Regex group 1 must capture the numeric ID
+  # Default matches: feat/PROJ-42-desc, fix/NELLUP-7, NELLUP-100/feature
+  branch_pattern: "[A-Z]+-([0-9]+)"
+
+# ── Review behavior ────────────────────────────────────────────────────────────
+review:
+  # Inject CLAUDE.md from repo root into every review prompt
+  inject_claude_md: true
+
+  # Fetch linked Plane ticket and inject into prompt
+  inject_plane_ticket: true
+
+  # Post review comment on GitHub PR
+  post_github_comment: true
+
+  # Post summary comment on Plane task
+  post_plane_comment: true
+
+  # Auto-transition Plane state based on review result
+  auto_transition_state: true
+
+  # Severities that block approval (turn approved: false)
+  blocking_severities:
+    - critical
+    - high
+
+# ── Notification (future) ──────────────────────────────────────────────────────
+# notifications:
+#   slack_webhook: ""
+#   notify_on: ["refused", "impediment"]

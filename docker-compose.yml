@@ -1,0 +1,88 @@
+services:
+  api:
+    build: .
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    env_file: .env
+    volumes:
+      - .:/app
+      - chromadb_data:/data/chromadb
+      - repos_tmp:/tmp/repos
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+
+  worker-reviews:
+    build: .
+    command: celery -A app.worker celery_app worker --loglevel=info --queues=reviews --concurrency=4
+    env_file: .env
+    volumes:
+      - .:/app
+      - chromadb_data:/data/chromadb
+      - repos_tmp:/tmp/repos
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+
+  worker-indexing:
+    build: .
+    command: celery -A app.worker celery_app worker --loglevel=info --queues=indexing --concurrency=2
+    env_file: .env
+    volumes:
+      - .:/app
+      - chromadb_data:/data/chromadb
+      - repos_tmp:/tmp/repos
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+
+  beat:
+    build: .
+    command: celery -A app.worker celery_app beat --loglevel=info
+    env_file: .env
+    volumes:
+      - .:/app
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    env_file: ./dashboard/.env
+    environment:
+      - BACKEND_URL=http://api:8000
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: reviewapp
+      POSTGRES_USER: reviewapp
+      POSTGRES_PASSWORD: reviewapp
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+volumes:
+  postgres_data:
+  redis_data:
+  chromadb_data:
+  repos_tmp:
