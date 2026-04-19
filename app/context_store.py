@@ -112,6 +112,9 @@ class ContextStore:
                         "end_line": c.end_line,
                         "tags": ",".join(c.tags),
                         "content_preview": c.content[:400],
+                        # Context node fields (GitNexus call graph)
+                        "calls": ",".join(c.calls[:10]) if c.calls else "",
+                        "called_by": ",".join(c.called_by[:10]) if c.called_by else "",
                     }
                     for c in batch
                 ],

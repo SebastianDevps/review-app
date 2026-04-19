@@ -31,6 +31,7 @@ from fastapi.responses import JSONResponse
 from app.api import router as dashboard_router
 from app.config import settings
 from app.database import init_db
+from app.github_app_setup import router as setup_router
 from app.worker import celery_app, index_repository, process_pull_request
 
 logging.basicConfig(level=settings.log_level)
@@ -53,6 +54,9 @@ app.add_middleware(
 
 # Dashboard REST API
 app.include_router(dashboard_router)
+
+# Self-service GitHub App setup (Manifest flow)
+app.include_router(setup_router)
 
 
 @app.on_event("startup")

@@ -187,9 +187,20 @@ def _format_chunk(chunk: dict) -> str:
     tags = chunk.get("tags", "")
     content = chunk.get("content_preview", "")
 
+    # Context node: call graph annotations (GitNexus-inspired)
+    calls = chunk.get("calls", "")
+    called_by = chunk.get("called_by", "")
+
     tag_str = f" [{tags}]" if tags else ""
     header = f"### `{file_path}:{start_line}-{end_line}` — {node_type} `{name}`{tag_str}"
-    return f"{header}\n```\n{content}\n```"
+
+    context_node = ""
+    if calls:
+        context_node += f"\n> calls: {calls}"
+    if called_by:
+        context_node += f"\n> called by: {called_by}"
+
+    return f"{header}{context_node}\n```\n{content}\n```"
 
 
 def _load_claude_md(repo_full_name: str, repo_dir: str | None) -> str:

@@ -89,6 +89,9 @@ class SemanticChunk:
     content: str                       # the actual source text
     docstring: str = ""                # extracted docstring if present
     tags: list[str] = field(default_factory=list)   # e.g. ["route", "async", "auth"]
+    # Context node fields (GitNexus-inspired call graph — static, no graph DB needed)
+    calls: list[str] = field(default_factory=list)    # function names this chunk calls
+    called_by: list[str] = field(default_factory=list)  # filled post-index via _resolve_call_graph
 
     @property
     def chunk_id(self) -> str:
@@ -190,6 +193,9 @@ class RepoIndexer:
                 logger.debug("Failed to parse %s: %s", relative_path, exc)
                 files_skipped += 1
 
+        # ── Context nodes: resolve call graph ────────────────────────────────
+        _resolve_call_graph(chunks)
+
         logger.info(
             "Indexed %s: %d files parsed, %d skipped, %d chunks extracted",
             self.repo, files_processed, files_skipped, len(chunks),
@@ -251,6 +257,7 @@ class RepoIndexer:
         name = self._extract_name(node)
         docstring = self._extract_docstring(node, lines, language)
         tags = self._infer_tags(node, content, language)
+        calls = _extract_calls_from_content(content)
 
         return SemanticChunk(
             repo=self.repo,
@@ -263,6 +270,7 @@ class RepoIndexer:
             content=content,
             docstring=docstring,
             tags=tags,
+            calls=calls,
         )
 
     def _extract_name(self, node) -> str:
@@ -352,3 +360,55 @@ class RepoIndexer:
                 start_line = i + 1
 
         return chunks
+
+
+# ── Context nodes: call graph (GitNexus-inspired, static — no graph DB needed) ─
+
+import re  # noqa: E402
+
+
+def _extract_calls_from_content(content: str) -> list[str]:
+    """
+    Extract function/method names that this chunk calls.
+    Finds: self.foo(, cls.bar(, await foo(, direct_call(
+    """
+    calls: set[str] = set()
+    for m in re.finditer(r"(?:await\s+)?(?:self|cls)\.([a-zA-Z_]\w+)\s*\(", content):
+        calls.add(m.group(1))
+    for m in re.finditer(r"(?<![.\w])([a-z_][a-zA-Z_0-9]+)\s*\(", content):
+        name = m.group(1)
+        if name not in _PYTHON_BUILTINS and len(name) > 3:
+            calls.add(name)
+    return list(calls)[:20]
+
+
+def _resolve_call_graph(chunks: list[SemanticChunk]) -> None:
+    """
+    Fill `called_by` on each chunk by inverting the `calls` lists.
+
+    For every chunk A that calls "foo", find chunk B where B.name == "foo"
+    and add A.name to B.called_by.
+
+    GitNexus-style context nodes without a graph DB:
+    each chunk knows its callers and callees after this runs.
+    """
+    name_to_chunks: dict[str, list[int]] = {}
+    for i, chunk in enumerate(chunks):
+        if chunk.name:
+            name_to_chunks.setdefault(chunk.name, []).append(i)
+
+    for chunk in chunks:
+        for called_name in chunk.calls:
+            for target_idx in name_to_chunks.get(called_name, []):
+                target = chunks[target_idx]
+                if chunk.name and chunk.name not in target.called_by:
+                    target.called_by.append(chunk.name)
+
+
+_PYTHON_BUILTINS = {
+    "print", "len", "range", "str", "int", "float", "list", "dict", "set",
+    "tuple", "bool", "type", "isinstance", "issubclass", "hasattr", "getattr",
+    "setattr", "super", "open", "zip", "map", "filter", "sorted", "reversed",
+    "enumerate", "iter", "next", "any", "all", "sum", "min", "max", "abs",
+    "round", "repr", "format", "input", "vars", "dir", "id", "hash",
+}
