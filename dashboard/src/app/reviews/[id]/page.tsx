@@ -1,3 +1,4 @@
+export const dynamic = "force-dynamic";
 import { api } from "@/lib/api";
 import { format } from "date-fns";
 import { CheckCircle, XCircle, GitPullRequest, FileCode } from "lucide-react";

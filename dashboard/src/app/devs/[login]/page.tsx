@@ -1,3 +1,4 @@
+export const dynamic = "force-dynamic";
 import { api } from "@/lib/api";
 import { formatDistanceToNow } from "date-fns";
 import { CheckCircle, XCircle, Minus, FileCode } from "lucide-react";

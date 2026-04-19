@@ -1,3 +1,4 @@
+export const dynamic = "force-dynamic";
 import { api } from "@/lib/api";
 import { formatDistanceToNow } from "date-fns";
 import { CheckCircle, Clock, Database, ExternalLink, GitBranch, RefreshCw } from "lucide-react";

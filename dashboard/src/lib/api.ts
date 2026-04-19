@@ -1,9 +1,16 @@
 /**
  * API client — thin wrapper around fetch to the FastAPI backend.
- * All calls go through /api/backend/* which Next.js rewrites to http://localhost:8000/*
+ *
+ * Server Components (SSR/ISR): use BACKEND_URL env var directly → avoids
+ * relative-URL issue during Next.js build/render on the server side.
+ *
+ * Client Components: use /api/backend/* rewrite → proxied by Next.js to backend.
  */
 
-const BASE = "/api/backend";
+const isServer = typeof window === "undefined";
+const BASE = isServer
+  ? (process.env.BACKEND_URL || "http://localhost:8000")
+  : "/api/backend";
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
