@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     app_env: str = "development"
     app_secret_key: str = "change-me"
     log_level: str = "INFO"
+    public_url: str = ""    # PUBLIC_URL=https://xxxx.ngrok-free.app
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

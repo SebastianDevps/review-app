@@ -28,6 +28,8 @@ import httpx
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
+from app.config import settings
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/setup", tags=["setup"])
@@ -55,26 +57,22 @@ async def setup_page(request: Request) -> HTMLResponse:
         """
         return HTMLResponse(_setup_html("Setup — Review App", status_html))
 
-    # Try to auto-detect ngrok URL
-    ngrok_url = await _detect_ngrok_url()
-
-    ngrok_hint = ""
-    if ngrok_url:
-        ngrok_hint = f'<p class="hint">✅ ngrok detectado: <code>{ngrok_url}</code></p>'
+    public_url = settings.public_url.rstrip("/")
+    if not public_url:
+        status_html = """
+            <div class="status error">
+              ❌ <code>PUBLIC_URL</code> no está configurada en <code>.env</code>.<br><br>
+              Agrega la siguiente línea a tu <code>.env</code> y reinicia:
+            </div>
+            <pre style="background:#1a1a26;padding:12px;border-radius:6px;color:#a5b4fc;">PUBLIC_URL=https://xxxx.ngrok-free.app</pre>
+            <p style="color:#8888a8;font-size:.9em">Obtén la URL ejecutando <code>ngrok http 4001</code> en una terminal.</p>
+        """
+        return HTMLResponse(_setup_html("Setup — Review App", status_html))
 
     status_html = f"""
         <div class="status pending">⏳ GitHub App aún no configurada</div>
-        <p>Para crear la GitHub App necesitamos una URL pública (ngrok).<br>
-           Ejecuta <code>ngrok http 4001</code> en una terminal y pega la URL aquí.</p>
-        {ngrok_hint}
-        <form method="get" action="/setup/github">
-          <label>URL pública (https://xxxx.ngrok-free.app)</label><br>
-          <input type="url" name="public_url" required placeholder="https://xxxx.ngrok-free.app"
-                 value="{ngrok_url or ''}"
-                 style="width:100%;padding:10px;margin:8px 0 16px;border:1px solid #444;
-                        background:#1a1a26;color:#e2e2f0;border-radius:6px;font-size:1rem;">
-          <button type="submit" class="btn">Crear GitHub App →</button>
-        </form>
+        <p>Webhook URL configurada: <code>{public_url}/webhooks/github</code></p>
+        <a href="/setup/github" class="btn">Crear GitHub App →</a>
     """
     return HTMLResponse(_setup_html("Setup — Review App", status_html))
 
@@ -82,16 +80,15 @@ async def setup_page(request: Request) -> HTMLResponse:
 # ── Step 2 — Redirect to GitHub with manifest ─────────────────────────────────
 
 @router.get("/github")
-def redirect_to_github(request: Request, public_url: str = "") -> HTMLResponse:
+def redirect_to_github(request: Request) -> HTMLResponse:
     """
     GitHub App Manifest flow: POST a manifest to GitHub via auto-submit form.
-    Uses the provided public_url (ngrok) for webhook — GitHub requires a reachable URL.
+    Reads PUBLIC_URL from settings (set in .env).
     """
-    public_url = public_url.rstrip("/")
+    public_url = settings.public_url.rstrip("/")
     if not public_url:
         return HTMLResponse(_setup_html("Error", """
-            <div class='status error'>❌ Falta la URL pública.<br>
-            Ejecuta <code>ngrok http 4001</code> y vuelve a intentarlo.</div>
+            <div class='status error'>❌ <code>PUBLIC_URL</code> no está en <code>.env</code>.</div>
             <p><a href='/setup'>← Volver</a></p>
         """))
 
