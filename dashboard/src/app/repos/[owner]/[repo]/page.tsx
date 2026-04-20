@@ -16,6 +16,10 @@ export default async function RepoDetailPage({
   return (
     <div className="p-8 space-y-6">
       <div>
+        <Link href="/repos" className="inline-flex items-center gap-1 text-sm mb-3 hover:underline"
+          style={{ color: "var(--text-muted)" }}>
+          ← Repositories
+        </Link>
         <h1 className="text-2xl font-bold" style={{ color: "var(--text)" }}>
           {owner}/{repo}
         </h1>
