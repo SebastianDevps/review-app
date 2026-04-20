@@ -20,6 +20,22 @@ class Base(DeclarativeBase):
     pass
 
 
+class GitHubAppConfig(Base):
+    """Stores GitHub App credentials — filled automatically via /setup flow."""
+    __tablename__ = "github_app_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    app_id: Mapped[str] = mapped_column(String(50), nullable=False)
+    app_slug: Mapped[str] = mapped_column(String(100), nullable=False)
+    private_key: Mapped[str] = mapped_column(Text, nullable=False)
+    webhook_secret: Mapped[str] = mapped_column(String(200), nullable=False)
+    client_id: Mapped[str] = mapped_column(String(100), default="")
+    client_secret: Mapped[str] = mapped_column(String(200), default="")
+    installation_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
 class Repository(Base):
     __tablename__ = "repositories"
 

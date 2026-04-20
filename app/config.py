@@ -4,10 +4,10 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    # GitHub App
-    github_app_id: str
-    github_app_private_key: str
-    github_webhook_secret: str
+    # GitHub App (filled automatically via /setup)
+    github_app_id: str = ""
+    github_app_private_key: str = ""
+    github_webhook_secret: str = ""
 
     # Anthropic
     anthropic_api_key: str = "sk-ant-mock"  # optional when mock_ai=true

@@ -25,9 +25,24 @@ logger = logging.getLogger(__name__)
 GITHUB_API = "https://api.github.com"
 
 
+def _get_app_credentials() -> tuple[str, str]:
+    """
+    Returns (app_id, private_key_pem).
+    Prefers DB config (dynamic), falls back to settings/.env (static).
+    """
+    try:
+        from app.persistence import load_github_app_config
+        cfg = load_github_app_config()
+        if cfg and cfg.app_id and cfg.private_key:
+            return cfg.app_id, cfg.private_key.replace("\\n", "\n")
+    except Exception as exc:
+        logger.debug("Could not load GitHub App config from DB: %s", exc)
+    # Fallback: .env
+    return settings.github_app_id, settings.github_app_private_key.replace("\\n", "\n")
+
+
 def _load_private_key() -> RSAPrivateKey:
-    """Load the RSA private key from settings (supports \\n escaped PEM strings)."""
-    pem = settings.github_app_private_key.replace("\\n", "\n")
+    _, pem = _get_app_credentials()
     return serialization.load_pem_private_key(pem.encode(), password=None)  # type: ignore[return-value]
 
 
@@ -36,11 +51,12 @@ def generate_app_jwt() -> str:
     Generate a 10-minute JWT to authenticate as the GitHub App itself.
     Backdated 60s to account for clock skew between servers.
     """
+    app_id, _ = _get_app_credentials()
     now = int(time.time())
     payload = {
         "iat": now - 60,
         "exp": now + 600,  # 10 minutes
-        "iss": settings.github_app_id,
+        "iss": app_id,
     }
     private_key = _load_private_key()
     return jwt.encode(payload, private_key, algorithm="RS256")  # type: ignore[arg-type]

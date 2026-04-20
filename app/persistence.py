@@ -11,9 +11,62 @@ import logging
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
-from app.models import PullRequest, Repository, Review, ReviewIssue
+from app.models import GitHubAppConfig, PullRequest, Repository, Review, ReviewIssue
 
 logger = logging.getLogger(__name__)
+
+
+# ── GitHub App Config (dynamic credentials from DB) ───────────────────────────
+
+def save_github_app_config(
+    app_id: str,
+    app_slug: str,
+    private_key: str,
+    webhook_secret: str,
+    client_id: str = "",
+    client_secret: str = "",
+    installation_id: int | None = None,
+) -> None:
+    """Upsert GitHub App credentials — always one row (id=1)."""
+    with SessionLocal() as db:
+        existing = db.query(GitHubAppConfig).first()
+        if existing:
+            existing.app_id = app_id
+            existing.app_slug = app_slug
+            existing.private_key = private_key
+            existing.webhook_secret = webhook_secret
+            existing.client_id = client_id
+            existing.client_secret = client_secret
+            if installation_id:
+                existing.installation_id = installation_id
+        else:
+            db.add(GitHubAppConfig(
+                app_id=app_id,
+                app_slug=app_slug,
+                private_key=private_key,
+                webhook_secret=webhook_secret,
+                client_id=client_id,
+                client_secret=client_secret,
+                installation_id=installation_id,
+            ))
+        db.commit()
+        logger.info("Saved GitHub App config: app_id=%s slug=%s", app_id, app_slug)
+
+
+def save_github_installation_id(installation_id: int) -> None:
+    """Update only the installation_id on the existing App config row."""
+    with SessionLocal() as db:
+        row = db.query(GitHubAppConfig).first()
+        if row:
+            row.installation_id = installation_id
+            db.commit()
+            logger.info("Updated installation_id=%s", installation_id)
+
+
+def load_github_app_config() -> GitHubAppConfig | None:
+    """Load the GitHub App config from DB. Returns None if not configured yet."""
+    with SessionLocal() as db:
+        return db.query(GitHubAppConfig).first()
 
 
 # ── Repository ─────────────────────────────────────────────────────────────────

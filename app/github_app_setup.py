@@ -33,15 +33,16 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/setup", tags=["setup"])
 
 GITHUB_API = "https://github.com"
-CREDENTIALS_FILE = "/data/github_app_credentials.json"
+CREDENTIALS_FILE = "/app/.github_app_credentials.json"
 
 
 # ── Step 1 — Setup landing page ───────────────────────────────────────────────
 
 @router.get("", response_class=HTMLResponse)
-def setup_page(request: Request) -> HTMLResponse:
-    """Landing page — shows current status and 'Connect GitHub' button."""
+async def setup_page(request: Request) -> HTMLResponse:
+    """Landing page — shows current status and public URL form."""
     creds = _load_credentials()
+
     if creds:
         installed = creds.get("installation_id")
         status_html = f"""
@@ -50,41 +51,64 @@ def setup_page(request: Request) -> HTMLResponse:
           {'✅ Instalada en repositorios' if installed else '⚠️ Aún no instalada en ningún repositorio'}
         </div>
         {'<a href="/setup/install" class="btn">Instalar en un repositorio</a>' if not installed else ''}
-        <p><a href="/">← Ir al dashboard</a></p>
+        <p><a href="http://localhost:4000/dashboard">← Ir al dashboard</a></p>
         """
-    else:
-        status_html = """
-        <div class="status pending">
-          ⏳ GitHub App aún no configurada
-        </div>
-        <p>Haz clic en el botón para crear e instalar la GitHub App automáticamente.</p>
-        <a href="/setup/github" class="btn">Conectar con GitHub →</a>
-        """
+        return HTMLResponse(_setup_html("Setup — Review App", status_html))
 
+    # Try to auto-detect ngrok URL
+    ngrok_url = await _detect_ngrok_url()
+
+    ngrok_hint = ""
+    if ngrok_url:
+        ngrok_hint = f'<p class="hint">✅ ngrok detectado: <code>{ngrok_url}</code></p>'
+
+    status_html = f"""
+        <div class="status pending">⏳ GitHub App aún no configurada</div>
+        <p>Para crear la GitHub App necesitamos una URL pública (ngrok).<br>
+           Ejecuta <code>ngrok http 4001</code> en una terminal y pega la URL aquí.</p>
+        {ngrok_hint}
+        <form method="get" action="/setup/github">
+          <label>URL pública (https://xxxx.ngrok-free.app)</label><br>
+          <input type="url" name="public_url" required placeholder="https://xxxx.ngrok-free.app"
+                 value="{ngrok_url or ''}"
+                 style="width:100%;padding:10px;margin:8px 0 16px;border:1px solid #444;
+                        background:#1a1a26;color:#e2e2f0;border-radius:6px;font-size:1rem;">
+          <button type="submit" class="btn">Crear GitHub App →</button>
+        </form>
+    """
     return HTMLResponse(_setup_html("Setup — Review App", status_html))
 
 
 # ── Step 2 — Redirect to GitHub with manifest ─────────────────────────────────
 
 @router.get("/github")
-def redirect_to_github(request: Request) -> HTMLResponse:
+def redirect_to_github(request: Request, public_url: str = "") -> HTMLResponse:
     """
     GitHub App Manifest flow: POST a manifest to GitHub via auto-submit form.
-    GitHub creates the app and redirects to /setup/callback?code=...
+    Uses the provided public_url (ngrok) for webhook — GitHub requires a reachable URL.
     """
-    base_url = str(request.base_url).rstrip("/")
+    public_url = public_url.rstrip("/")
+    if not public_url:
+        return HTMLResponse(_setup_html("Error", """
+            <div class='status error'>❌ Falta la URL pública.<br>
+            Ejecuta <code>ngrok http 4001</code> y vuelve a intentarlo.</div>
+            <p><a href='/setup'>← Volver</a></p>
+        """))
+
+    # callback comes back to localhost (browser-accessible)
+    callback_url = f"http://localhost:4001/setup/callback"
     state = secrets.token_urlsafe(16)
 
     manifest = {
-        "name": "Review App",
-        "url": base_url,
+        "name": "ReviewApp-SebastianDevps",
+        "url": public_url,
         "hook_attributes": {
-            "url": f"{base_url}/webhooks/github",
+            "url": f"{public_url}/webhooks/github",
             "active": True,
         },
-        "redirect_url": f"{base_url}/setup/callback",
-        "callback_urls": [f"{base_url}/setup/callback"],
-        "setup_url": f"{base_url}/setup/install",
+        "redirect_url": callback_url,
+        "callback_urls": [callback_url],
+        "setup_url": callback_url,
         "description": "AI Code Review — GitHub App + Plane integration",
         "public": False,
         "default_permissions": {
@@ -97,29 +121,72 @@ def redirect_to_github(request: Request) -> HTMLResponse:
 
     manifest_json = json.dumps(manifest)
 
-    # GitHub App Manifest flow requires a form POST — we use an auto-submit form
     html = f"""<!DOCTYPE html>
 <html>
 <head><title>Conectando con GitHub...</title></head>
-<body>
+<body style="font-family:sans-serif;background:#0a0a0f;color:#e2e2f0;padding:40px;">
   <p>Redirigiendo a GitHub para crear la App...</p>
-  <form id="manifest-form" method="post" action="https://github.com/settings/apps/new?state={state}">
+  <form id="f" method="post" action="https://github.com/settings/apps/new?state={state}">
     <input type="hidden" name="manifest" value='{manifest_json}'>
   </form>
-  <script>document.getElementById('manifest-form').submit();</script>
+  <script>document.getElementById('f').submit();</script>
 </body>
 </html>"""
     return HTMLResponse(html)
 
 
-# ── Step 3 — GitHub callback (exchange code for credentials) ──────────────────
+# ── Step 3 — GitHub callback (exchange code OR save installation_id) ─────────
 
 @router.get("/callback")
-async def github_callback(code: str, state: str | None = None) -> HTMLResponse:
+async def github_callback(
+    code: str | None = None,
+    state: str | None = None,
+    installation_id: int | None = None,
+    setup_action: str | None = None,
+) -> HTMLResponse:
     """
-    GitHub redirects here after the user confirms the App creation.
-    Exchange the one-time code for App credentials (app_id, private_key, etc.)
+    Handles two cases:
+    1. Manifest creation callback → code present → exchange for credentials
+    2. Post-installation callback → installation_id present → save it
     """
+    # ── Case 2: post-installation hook (setup_url) ────────────────────────────
+    if installation_id and not code:
+        creds = _load_credentials() or {}
+        creds["installation_id"] = installation_id
+        _save_credentials(creds)
+        _update_env(creds)
+        logger.info("Saved installation_id=%s for App %s", installation_id, creds.get("app_id"))
+
+        # Save installation_id to DB
+        try:
+            from app.persistence import save_github_installation_id
+            save_github_installation_id(installation_id)
+        except Exception as exc:
+            logger.warning("Could not save installation_id to DB: %s", exc)
+
+        # Auto-sync repos into DB
+        repos_seeded = _sync_repos_to_db(installation_id)
+        repos_html = "".join(f"<li><code>{r}</code></li>" for r in repos_seeded)
+
+        return HTMLResponse(_setup_html("Instalación completa ✅", f"""
+            <div class='status ok'>
+              ✅ GitHub App instalada correctamente.<br>
+              Installation ID: <strong>{installation_id}</strong>
+            </div>
+            <p><strong>{len(repos_seeded)} repositorio(s) conectado(s):</strong></p>
+            <ul style="color:#6ee7b7;margin:8px 0 16px">{repos_html or '<li>ninguno aún</li>'}</ul>
+            <p>Abre un Pull Request en cualquiera de esos repos y el sistema lo revisará automáticamente.</p>
+            <a href="http://localhost:4000/dashboard" class="btn">Ir al Dashboard →</a>
+        """))
+
+    if not code:
+        return HTMLResponse(_setup_html("Error", """
+            <div class='status error'>❌ Callback inválido — falta code e installation_id.</div>
+            <p><a href='/setup'>← Volver</a></p>
+        """))
+
+    # ── Case 1: manifest conversion ───────────────────────────────────────────
+    """Exchange the one-time code for App credentials (app_id, private_key, etc.)"""
     url = f"https://api.github.com/app-manifests/{code}/conversions"
 
     async with httpx.AsyncClient(timeout=15) as client:
@@ -152,10 +219,23 @@ async def github_callback(code: str, state: str | None = None) -> HTMLResponse:
         "installation_id": None,
     }
 
-    _save_credentials(creds)
+    _save_credentials(creds)      # file-based backup
+    _update_env(creds)            # .env backup for container restarts
 
-    # Write to .env so the app picks it up on next start
-    _update_env(creds)
+    # ── Save to DB (primary — dynamic, no restart needed) ─────────────────────
+    try:
+        from app.persistence import save_github_app_config
+        save_github_app_config(
+            app_id=creds["app_id"],
+            app_slug=creds["app_slug"],
+            private_key=creds["private_key"],
+            webhook_secret=creds["webhook_secret"],
+            client_id=creds["client_id"],
+            client_secret=creds["client_secret"],
+        )
+        logger.info("GitHub App credentials saved to DB: app_id=%s", creds["app_id"])
+    except Exception as exc:
+        logger.warning("Could not save to DB yet (will work after restart): %s", exc)
 
     logger.info("GitHub App created: id=%s slug=%s", creds["app_id"], creds["app_slug"])
 
@@ -180,14 +260,18 @@ async def github_callback(code: str, state: str | None = None) -> HTMLResponse:
 @router.get("/status")
 def setup_status() -> JSONResponse:
     """Return current setup status (non-sensitive)."""
-    creds = _load_credentials()
-    if not creds:
-        return JSONResponse({"configured": False})
+    from app.config import settings
+    creds = _load_credentials() or {}
+    app_id = creds.get("app_id") or settings.github_app_id
+    has_key = bool(creds.get("private_key")) or (
+        bool(settings.github_app_private_key) and "FILL_ME" not in settings.github_app_private_key
+    )
+    configured = bool(app_id) and has_key and "FILL_ME" not in str(app_id)
     return JSONResponse({
-        "configured": True,
-        "app_id": creds.get("app_id"),
-        "app_slug": creds.get("app_slug"),
-        "has_private_key": bool(creds.get("private_key")),
+        "configured": configured,
+        "app_id": app_id,
+        "app_slug": creds.get("app_slug", "reviewapp-sebastiandevps"),
+        "has_private_key": has_key,
         "installation_id": creds.get("installation_id"),
     })
 
@@ -258,6 +342,57 @@ def _update_env(creds: dict) -> None:
         logger.warning("Could not update .env: %s", exc)
 
 
+def _sync_repos_to_db(installation_id: int) -> list[str]:
+    """Query GitHub for all repos in this installation and seed the DB."""
+    try:
+        from app.github_auth import get_installation_token
+        from app.persistence import upsert_repository
+        import httpx as _httpx
+
+        token = get_installation_token(installation_id)
+        with _httpx.Client(timeout=15) as client:
+            resp = client.get(
+                "https://api.github.com/installation/repositories",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Accept": "application/vnd.github+json",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+            )
+        if resp.status_code != 200:
+            logger.warning("Could not list repos: %s", resp.status_code)
+            return []
+
+        seeded = []
+        for r in resp.json().get("repositories", []):
+            upsert_repository(
+                installation_id=installation_id,
+                full_name=r["full_name"],
+                default_branch=r.get("default_branch", "main"),
+            )
+            seeded.append(r["full_name"])
+            logger.info("Auto-seeded repo: %s", r["full_name"])
+        return seeded
+    except Exception as exc:
+        logger.warning("_sync_repos_to_db failed: %s", exc)
+        return []
+
+
+async def _detect_ngrok_url() -> str:
+    """Try to auto-detect a running ngrok tunnel via the local ngrok API."""
+    try:
+        async with httpx.AsyncClient(timeout=2) as client:
+            resp = await client.get("http://host.docker.internal:4040/api/tunnels")
+            if resp.status_code == 200:
+                tunnels = resp.json().get("tunnels", [])
+                for t in tunnels:
+                    if t.get("proto") == "https":
+                        return t["public_url"]
+    except Exception:
+        pass
+    return ""
+
+
 def _setup_html(title: str, body: str) -> str:
     return f"""<!DOCTYPE html>
 <html lang="es">
@@ -276,7 +411,9 @@ def _setup_html(title: str, body: str) -> str:
     .btn {{ display: inline-block; background: #1a1a1a; color: white; padding: 12px 24px;
             border-radius: 8px; text-decoration: none; font-weight: 600; margin-top: 8px; }}
     .btn:hover {{ background: #333; }}
-    code {{ background: #f3f4f6; padding: 2px 6px; border-radius: 4px; font-size: 0.85em; }}
+    code {{ background: #1a1a26; padding: 2px 6px; border-radius: 4px; font-size: 0.85em; color: #a5b4fc; }}
+    .hint {{ color: #6ee7b7; font-size: 0.9em; margin: 4px 0 12px; }}
+    label {{ font-size: 0.9em; color: #8888a8; }}
   </style>
 </head>
 <body>

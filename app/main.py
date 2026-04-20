@@ -66,11 +66,27 @@ def on_startup() -> None:
 
 # ── Webhook signature verification ────────────────────────────────────────────
 
+def _get_webhook_secret() -> str:
+    """Load webhook secret from DB (dynamic) or fallback to .env."""
+    try:
+        from app.persistence import load_github_app_config
+        cfg = load_github_app_config()
+        if cfg and cfg.webhook_secret:
+            return cfg.webhook_secret
+    except Exception:
+        pass
+    return settings.github_webhook_secret
+
+
 def _verify_signature(payload: bytes, signature_header: str) -> bool:
     if not signature_header or not signature_header.startswith("sha256="):
         return False
+    secret = _get_webhook_secret()
+    if not secret:
+        logger.warning("No webhook secret configured — skipping signature check")
+        return True  # allow during initial setup
     expected = "sha256=" + hmac.new(
-        settings.github_webhook_secret.encode("latin-1"),
+        secret.encode("latin-1"),
         msg=payload,
         digestmod=hashlib.sha256,
     ).hexdigest()
@@ -104,6 +120,43 @@ def list_repos() -> dict:
             for r in repos
         ]
     }
+
+
+@app.post("/sync-repos/{installation_id}")
+def sync_repos(installation_id: int) -> dict:
+    """
+    Seed the DB with all repos for a GitHub App installation.
+    Use this when the installation webhook fired before the system was ready.
+    """
+    from app.github_auth import get_installation_token
+    from app.persistence import upsert_repository
+    import httpx
+
+    token = get_installation_token(installation_id)
+    with httpx.Client(timeout=15) as client:
+        resp = client.get(
+            "https://api.github.com/installation/repositories",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+        )
+    if resp.status_code != 200:
+        return {"error": f"GitHub API error: {resp.status_code}"}
+
+    repos_data = resp.json().get("repositories", [])
+    seeded = []
+    for r in repos_data:
+        upsert_repository(
+            installation_id=installation_id,
+            full_name=r["full_name"],
+            default_branch=r.get("default_branch", "main"),
+        )
+        seeded.append(r["full_name"])
+        logger.info("Seeded repo: %s", r["full_name"])
+
+    return {"seeded": seeded, "count": len(seeded)}
 
 
 @app.post("/index/{installation_id}/{owner}/{repo}")
