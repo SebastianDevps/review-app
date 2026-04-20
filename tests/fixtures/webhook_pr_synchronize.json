@@ -1,0 +1,43 @@
+{
+  "action": "synchronize",
+  "number": 42,
+  "before": "abc123def456abc123def456abc123def456abc123",
+  "after": "bcd234ef567bcd234ef567bcd234ef567bcd234ef",
+  "pull_request": {
+    "number": 42,
+    "title": "feat: add E2E test validation endpoint",
+    "body": "Updated with new commit",
+    "state": "open",
+    "head": {
+      "ref": "feature/TEST-42-e2e-validation",
+      "sha": "bcd234ef567bcd234ef567bcd234ef567bcd234ef"
+    },
+    "base": {
+      "ref": "main",
+      "sha": "000000000000000000000000000000000000000"
+    },
+    "user": {
+      "login": "testuser",
+      "id": 12345
+    },
+    "additions": 52,
+    "deletions": 5,
+    "changed_files": 3
+  },
+  "repository": {
+    "id": 987654321,
+    "full_name": "testowner/testrepo",
+    "name": "testrepo",
+    "owner": {
+      "login": "testowner"
+    },
+    "default_branch": "main",
+    "private": false
+  },
+  "installation": {
+    "id": 999
+  },
+  "sender": {
+    "login": "testuser"
+  }
+}

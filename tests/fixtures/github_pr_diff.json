@@ -1,0 +1,26 @@
+{
+  "url": "https://api.github.com/repos/testowner/testrepo/pulls/42",
+  "number": 42,
+  "title": "feat: add E2E test validation endpoint",
+  "state": "open",
+  "additions": 47,
+  "deletions": 3,
+  "changed_files": 2,
+  "mergeable": true,
+  "files": [
+    {
+      "filename": "app/api.py",
+      "status": "modified",
+      "additions": 30,
+      "deletions": 2,
+      "patch": "@@ -1,5 +1,35 @@\n from fastapi import APIRouter\n+\n+@router.get('/health/deep')\n+def deep_health():\n+    \"\"\"Deep health check — validates DB and worker connectivity.\"\"\"\n+    from app.database import engine\n+    from sqlalchemy import text\n+    try:\n+        with engine.connect() as conn:\n+            conn.execute(text('SELECT 1'))\n+        db_status = 'ok'\n+    except Exception as e:\n+        db_status = f'error: {e}'\n+    return {'db': db_status, 'status': 'ok'}\n"
+    },
+    {
+      "filename": "tests/test_health.py",
+      "status": "added",
+      "additions": 17,
+      "deletions": 0,
+      "patch": "@@ -0,0 +1,17 @@\n+import pytest\n+from fastapi.testclient import TestClient\n+from app.main import app\n+\n+client = TestClient(app)\n+\n+def test_deep_health_ok():\n+    resp = client.get('/health/deep')\n+    assert resp.status_code == 200\n+    assert resp.json()['status'] == 'ok'\n"
+    }
+  ]
+}
